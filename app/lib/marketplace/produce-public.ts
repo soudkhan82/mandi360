@@ -1,173 +1,158 @@
 import { createClientServer } from "@/app/config/supabase-server";
-
-export type FilterOption = {
-  id: string;
-  name: string;
-  slug?: string | null;
-};
+import type { ProduceListingCard } from "@/app/types/marketplace";
 
 export type ProducePublicFilters = {
-  cities: FilterOption[];
-  categories: FilterOption[];
+  cityIds: string[];
+  categoryIds: string[];
 };
 
 export type GetPublishedProduceListingsParams = {
   cityId?: string;
   categoryId?: string;
-  minPrice?: string;
-  maxPrice?: string;
-  limit?: number;
+  minPrice?: number;
+  maxPrice?: number;
 };
 
-export type ProducePublicListing = {
-  id: string;
-  slug?: string | null;
-  title: string;
-  description?: string | null;
-  price?: number | null;
-  priceUnit?: string | null;
-  city?: string | null;
-  cityName?: string | null;
-  category?: string | null;
-  categoryName?: string | null;
-  quantity?: number | null;
-  quantityUnit?: string | null;
-  imageUrl?: string | null;
-  postedAt?: string | null;
-  sellerName?: string | null;
+export type ProducePublicListingsResponse = {
+  data: ProduceListingCard[];
+  count: number;
 };
 
-function normalizeText(value: unknown): string | null {
-  if (typeof value !== "string") return null;
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : null;
+function normalizeText(value: unknown): string {
+  if (typeof value !== "string") return "";
+  return value.trim();
+}
+
+function normalizeNullableText(value: unknown): string | null {
+  const text = normalizeText(value);
+  return text.length > 0 ? text : null;
 }
 
 function normalizeNumber(value: unknown): number | null {
   if (typeof value === "number" && Number.isFinite(value)) return value;
+
   if (typeof value === "string") {
     const parsed = Number(value.replace(/,/g, "").trim());
     return Number.isFinite(parsed) ? parsed : null;
   }
+
   return null;
 }
 
-function pickFirstString(
-  obj: Record<string, unknown>,
+function pickFirstString(row: Record<string, unknown>, keys: string[]): string {
+  for (const key of keys) {
+    const value = normalizeText(row[key]);
+    if (value) return value;
+  }
+  return "";
+}
+
+function pickFirstNullableString(
+  row: Record<string, unknown>,
   keys: string[],
 ): string | null {
   for (const key of keys) {
-    const value = normalizeText(obj[key]);
+    const value = normalizeNullableText(row[key]);
     if (value) return value;
   }
   return null;
 }
 
 function pickFirstNumber(
-  obj: Record<string, unknown>,
+  row: Record<string, unknown>,
   keys: string[],
 ): number | null {
   for (const key of keys) {
-    const value = normalizeNumber(obj[key]);
+    const value = normalizeNumber(row[key]);
     if (value !== null) return value;
   }
   return null;
 }
 
-function mapFilterOption(row: Record<string, unknown>): FilterOption | null {
-  const id =
-    pickFirstString(row, ["id", "city_id", "category_id", "value"]) ??
-    String(row.id ?? row.city_id ?? row.category_id ?? row.value ?? "").trim();
+function mapListing(row: Record<string, unknown>): ProduceListingCard {
+  const price =
+    pickFirstNumber(row, ["price_per_unit", "price", "rate", "amount"]) ?? 0;
 
-  const name = pickFirstString(row, [
-    "name",
-    "title",
-    "label",
-    "city_name",
-    "category_name",
-  ]);
+  const quantity =
+    pickFirstNumber(row, ["quantity", "qty", "available_quantity"]) ?? 0;
 
-  if (!id || !name) return null;
-
-  return {
-    id,
-    name,
-    slug: pickFirstString(row, ["slug"]),
-  };
-}
-
-function mapProduceListing(row: Record<string, unknown>): ProducePublicListing {
-  return {
+  const listing: ProduceListingCard = {
     id: String(row.id ?? ""),
-    slug: pickFirstString(row, ["slug"]),
+    slug: pickFirstNullableString(row, ["slug"]),
     title:
-      pickFirstString(row, ["title", "produce_name", "name"]) ??
+      pickFirstString(row, ["title", "produce_name", "name"]) ||
       "Untitled listing",
-    description: pickFirstString(row, ["description", "details"]),
-    price: pickFirstNumber(row, ["price", "rate", "amount"]),
-    priceUnit: pickFirstString(row, ["price_unit", "unit", "rate_unit"]),
-    city:
-      pickFirstString(row, ["city", "city_name"]) ??
-      pickFirstString(row, ["city_id"]),
-    cityName: pickFirstString(row, ["city_name", "city"]),
-    category:
-      pickFirstString(row, ["category", "category_name"]) ??
-      pickFirstString(row, ["category_id"]),
-    categoryName: pickFirstString(row, ["category_name", "category"]),
-    quantity: pickFirstNumber(row, ["quantity", "qty"]),
-    quantityUnit: pickFirstString(row, ["quantity_unit", "qty_unit"]),
-    imageUrl: pickFirstString(row, ["image_url", "image", "thumbnail_url"]),
-    postedAt: pickFirstString(row, ["posted_at", "created_at", "published_at"]),
-    sellerName: pickFirstString(row, [
-      "seller_name",
-      "user_name",
-      "owner_name",
+    description: pickFirstNullableString(row, ["description", "details"]),
+    city: pickFirstString(row, ["city", "city_name", "city_id"]),
+    category: pickFirstString(row, [
+      "category",
+      "category_name",
+      "category_id",
     ]),
+    quantity,
+    unit:
+      pickFirstString(row, [
+        "unit",
+        "quantity_unit",
+        "qty_unit",
+        "price_unit",
+      ]) || "kg",
+    price_per_unit: price,
+    price_unit:
+      pickFirstString(row, ["price_unit", "unit", "quantity_unit"]) || "kg",
+    created_at:
+      pickFirstString(row, ["created_at", "posted_at", "published_at"]) ||
+      new Date().toISOString(),
+    status: pickFirstString(row, ["status"]) || "published",
   };
+
+  return listing;
 }
 
 export async function getProduceFilterOptions(): Promise<ProducePublicFilters> {
   const supabase = await createClientServer();
 
   const [citiesRes, categoriesRes] = await Promise.all([
-    supabase
-      .from("cities")
-      .select("id,name,slug")
-      .order("name", { ascending: true }),
+    supabase.from("cities").select("id").order("id", { ascending: true }),
     supabase
       .from("produce_categories")
-      .select("id,name,slug")
-      .order("name", { ascending: true }),
+      .select("id")
+      .order("id", { ascending: true }),
   ]);
 
-  const cities =
+  const cityIds =
     citiesRes.error || !Array.isArray(citiesRes.data)
       ? []
       : citiesRes.data
-          .map((row) => mapFilterOption(row as Record<string, unknown>))
-          .filter((item): item is FilterOption => Boolean(item));
+          .map((row) => normalizeText((row as Record<string, unknown>).id))
+          .filter(Boolean);
 
-  const categories =
+  const categoryIds =
     categoriesRes.error || !Array.isArray(categoriesRes.data)
       ? []
       : categoriesRes.data
-          .map((row) => mapFilterOption(row as Record<string, unknown>))
-          .filter((item): item is FilterOption => Boolean(item));
+          .map((row) => normalizeText((row as Record<string, unknown>).id))
+          .filter(Boolean);
 
-  return { cities, categories };
+  return { cityIds, categoryIds };
 }
 
 export async function getPublishedProduceListings(
   params: GetPublishedProduceListingsParams = {},
-): Promise<ProducePublicListing[]> {
+  page = 1,
+  pageSize = 12,
+): Promise<ProducePublicListingsResponse> {
   const supabase = await createClientServer();
+
+  const from = (page - 1) * pageSize;
+  const to = from + pageSize - 1;
 
   let query = supabase
     .from("produce_listings")
-    .select("*")
+    .select("*", { count: "exact" })
     .eq("status", "published")
     .order("created_at", { ascending: false })
-    .limit(params.limit ?? 24);
+    .range(from, to);
 
   if (params.cityId) {
     query = query.eq("city_id", params.cityId);
@@ -177,25 +162,27 @@ export async function getPublishedProduceListings(
     query = query.eq("category_id", params.categoryId);
   }
 
-  if (params.minPrice && params.minPrice.trim() !== "") {
-    const min = Number(params.minPrice);
-    if (Number.isFinite(min)) {
-      query = query.gte("price", min);
-    }
+  if (typeof params.minPrice === "number" && Number.isFinite(params.minPrice)) {
+    query = query.gte("price", params.minPrice);
   }
 
-  if (params.maxPrice && params.maxPrice.trim() !== "") {
-    const max = Number(params.maxPrice);
-    if (Number.isFinite(max)) {
-      query = query.lte("price", max);
-    }
+  if (typeof params.maxPrice === "number" && Number.isFinite(params.maxPrice)) {
+    query = query.lte("price", params.maxPrice);
   }
 
-  const { data, error } = await query;
+  const { data, error, count } = await query;
 
   if (error || !Array.isArray(data)) {
-    return [];
+    return {
+      data: [],
+      count: 0,
+    };
   }
 
-  return data.map((row) => mapProduceListing(row as Record<string, unknown>));
+  return {
+    data: data
+      .map((row) => mapListing(row as Record<string, unknown>))
+      .filter((item) => item.id),
+    count: count ?? 0,
+  };
 }

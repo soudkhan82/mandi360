@@ -1,212 +1,201 @@
-import { createClientServer } from "@/app/config/supabase-server";
+import ProduceListingCard from "./_components/ProduceListingCard";
+import MarketPlaceFilters from "./_components/MarketPlaceFilters";
+import {
+  getProduceFilterOptions,
+  getPublishedProduceListings,
+} from "@/app/lib/marketplace/produce-public";
 
-export type FilterOption = {
-  id: string;
-  name: string;
-  slug?: string | null;
-};
-
-export type ProducePublicFilters = {
-  cityIds: FilterOption[];
-  categoryIds: FilterOption[];
-};
-
-export type GetPublishedProduceListingsParams = {
+type SearchParams = {
   cityId?: string;
   categoryId?: string;
-  minPrice?: number;
-  maxPrice?: number;
+  minPrice?: string;
+  maxPrice?: string;
+  page?: string;
 };
 
-export type ProducePublicListing = {
-  id: string;
-  slug?: string | null;
-  title: string;
-  description?: string | null;
-  price?: number | null;
-  priceUnit?: string | null;
-  city?: string | null;
-  cityName?: string | null;
-  category?: string | null;
-  categoryName?: string | null;
-  quantity?: number | null;
-  quantityUnit?: string | null;
-  imageUrl?: string | null;
-  postedAt?: string | null;
-  sellerName?: string | null;
+type Props = {
+  searchParams?: Promise<SearchParams>;
 };
 
-export type ProducePublicListingsResponse = {
-  data: ProducePublicListing[];
-  count: number;
-};
-
-function normalizeText(value: unknown): string | null {
-  if (typeof value !== "string") return null;
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : null;
+function parsePositiveNumber(value?: string): number | undefined {
+  if (!value) return undefined;
+  const num = Number(value);
+  if (!Number.isFinite(num) || num < 0) return undefined;
+  return num;
 }
 
-function normalizeNumber(value: unknown): number | null {
-  if (typeof value === "number" && Number.isFinite(value)) return value;
-
-  if (typeof value === "string") {
-    const parsed = Number(value.replace(/,/g, "").trim());
-    return Number.isFinite(parsed) ? parsed : null;
+function buildPageHref(
+  page: number,
+  params: {
+    cityId?: string;
+    categoryId?: string;
+    minPrice?: string;
+    maxPrice?: string;
   }
+) {
+  const qs = new URLSearchParams();
 
-  return null;
+  if (params.cityId) qs.set("cityId", params.cityId);
+  if (params.categoryId) qs.set("categoryId", params.categoryId);
+  if (params.minPrice) qs.set("minPrice", params.minPrice);
+  if (params.maxPrice) qs.set("maxPrice", params.maxPrice);
+  qs.set("page", String(page));
+
+  return `/marketplace?${qs.toString()}`;
 }
 
-function pickFirstString(
-  obj: Record<string, unknown>,
-  keys: string[],
-): string | null {
-  for (const key of keys) {
-    const value = normalizeText(obj[key]);
-    if (value) return value;
-  }
-  return null;
-}
+export default async function MarketplacePage({ searchParams }: Props) {
+  const params = (await searchParams) ?? {};
 
-function pickFirstNumber(
-  obj: Record<string, unknown>,
-  keys: string[],
-): number | null {
-  for (const key of keys) {
-    const value = normalizeNumber(obj[key]);
-    if (value !== null) return value;
-  }
-  return null;
-}
+  const cityId = params.cityId?.trim() || undefined;
+  const categoryId = params.categoryId?.trim() || undefined;
+  const minPrice = parsePositiveNumber(params.minPrice);
+  const maxPrice = parsePositiveNumber(params.maxPrice);
 
-function mapFilterOption(row: Record<string, unknown>): FilterOption | null {
-  const rawId = row.id ?? row.city_id ?? row.category_id ?? row.value;
-  const id =
-    typeof rawId === "string" ? rawId.trim() : String(rawId ?? "").trim();
+  const page = Math.max(1, Number(params.page || "1") || 1);
+  const pageSize = 12;
 
-  const name = pickFirstString(row, [
-    "name",
-    "title",
-    "label",
-    "city_name",
-    "category_name",
+  const [{ cityIds, categoryIds }, listingsRes] = await Promise.all([
+    getProduceFilterOptions(),
+    getPublishedProduceListings(
+      {
+        cityId,
+        categoryId,
+        minPrice,
+        maxPrice,
+      },
+      page,
+      pageSize
+    ),
   ]);
 
-  if (!id || !name) return null;
+  const safeListings = (listingsRes.data ?? []).filter(
+    (listing) => listing && listing.id
+  );
 
-  return {
-    id,
-    name,
-    slug: pickFirstString(row, ["slug"]),
-  };
-}
+  const totalCount = listingsRes.count ?? 0;
+  const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
+  const hasPrev = page > 1;
+  const hasNext = page < totalPages;
 
-function mapProduceListing(row: Record<string, unknown>): ProducePublicListing {
-  return {
-    id: String(row.id ?? ""),
-    slug: pickFirstString(row, ["slug"]),
-    title:
-      pickFirstString(row, ["title", "produce_name", "name"]) ??
-      "Untitled listing",
-    description: pickFirstString(row, ["description", "details"]),
-    price: pickFirstNumber(row, ["price", "rate", "amount"]),
-    priceUnit: pickFirstString(row, ["price_unit", "unit", "rate_unit"]),
-    city:
-      pickFirstString(row, ["city", "city_name"]) ??
-      pickFirstString(row, ["city_id"]),
-    cityName: pickFirstString(row, ["city_name", "city"]),
-    category:
-      pickFirstString(row, ["category", "category_name"]) ??
-      pickFirstString(row, ["category_id"]),
-    categoryName: pickFirstString(row, ["category_name", "category"]),
-    quantity: pickFirstNumber(row, ["quantity", "qty"]),
-    quantityUnit: pickFirstString(row, ["quantity_unit", "qty_unit"]),
-    imageUrl: pickFirstString(row, ["image_url", "image", "thumbnail_url"]),
-    postedAt: pickFirstString(row, ["posted_at", "created_at", "published_at"]),
-    sellerName: pickFirstString(row, [
-      "seller_name",
-      "user_name",
-      "owner_name",
-    ]),
-  };
-}
+  return (
+    <main className="min-h-screen bg-slate-50">
+      <section className="border-b border-slate-200 bg-white">
+        <div className="mx-auto max-w-7xl px-4 py-10 sm:px-6 lg:px-8 lg:py-14">
+          <div className="max-w-3xl">
+            <div className="mb-3 inline-flex items-center rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-emerald-700">
+              Public Agri Marketplace
+            </div>
 
-export async function getProduceFilterOptions(): Promise<ProducePublicFilters> {
-  const supabase = await createClientServer();
+            <h1 className="text-3xl font-bold tracking-tight text-slate-900 md:text-5xl">
+              Discover produce listings across cities
+            </h1>
 
-  const [citiesRes, categoriesRes] = await Promise.all([
-    supabase
-      .from("cities")
-      .select("id,name,slug")
-      .order("name", { ascending: true }),
-    supabase
-      .from("produce_categories")
-      .select("id,name,slug")
-      .order("name", { ascending: true }),
-  ]);
+            <p className="mt-4 text-base leading-7 text-slate-600 md:text-lg">
+              Browse publicly available listings in a clean marketplace
+              experience. Login is only needed for posting and account actions.
+            </p>
+          </div>
+        </div>
+      </section>
 
-  const cityIds =
-    citiesRes.error || !Array.isArray(citiesRes.data)
-      ? []
-      : citiesRes.data
-          .map((row) => mapFilterOption(row as Record<string, unknown>))
-          .filter((item): item is FilterOption => Boolean(item));
+      <section className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
+        <MarketPlaceFilters
+          cityIds={cityIds}
+          categoryIds={categoryIds}
+          selectedCityId={params.cityId}
+          selectedCategoryId={params.categoryId}
+          minPrice={params.minPrice}
+          maxPrice={params.maxPrice}
+        />
+      </section>
 
-  const categoryIds =
-    categoriesRes.error || !Array.isArray(categoriesRes.data)
-      ? []
-      : categoriesRes.data
-          .map((row) => mapFilterOption(row as Record<string, unknown>))
-          .filter((item): item is FilterOption => Boolean(item));
+      <section className="mx-auto max-w-7xl px-4 pb-12 sm:px-6 lg:px-8">
+        <div className="mb-5 flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+          <div>
+            <h2 className="text-xl font-semibold text-slate-900">
+              Available Listings
+            </h2>
+            <p className="text-sm text-slate-500">
+              {totalCount} published listing{totalCount === 1 ? "" : "s"} found
+            </p>
+          </div>
 
-  return { cityIds, categoryIds };
-}
+          <div className="text-sm text-slate-500">
+            Page {page} of {totalPages}
+          </div>
+        </div>
 
-export async function getPublishedProduceListings(
-  params: GetPublishedProduceListingsParams = {},
-  page = 1,
-  pageSize = 12,
-): Promise<ProducePublicListingsResponse> {
-  const supabase = await createClientServer();
+        {safeListings.length === 0 ? (
+          <div className="rounded-2xl border border-dashed border-slate-300 bg-white px-6 py-16 text-center shadow-sm">
+            <h3 className="text-lg font-semibold text-slate-900">
+              No listings found
+            </h3>
+            <p className="mt-2 text-sm text-slate-500">
+              Try changing your filters or clear them to browse all public
+              listings.
+            </p>
+            <div className="mt-5">
+              <a
+                href="/marketplace"
+                className="inline-flex rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-700"
+              >
+                Clear Filters
+              </a>
+            </div>
+          </div>
+        ) : (
+          <>
+            <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-3">
+              {safeListings.map((listing) => (
+                <ProduceListingCard key={listing.id} listing={listing} />
+              ))}
+            </div>
 
-  const from = (page - 1) * pageSize;
-  const to = from + pageSize - 1;
+            <div className="mt-8 flex items-center justify-center gap-3">
+              {hasPrev ? (
+                <a
+                  href={buildPageHref(page - 1, {
+                    cityId: params.cityId,
+                    categoryId: params.categoryId,
+                    minPrice: params.minPrice,
+                    maxPrice: params.maxPrice,
+                  })}
+                  className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+                >
+                  Previous
+                </a>
+              ) : (
+                <span className="cursor-not-allowed rounded-xl border border-slate-200 bg-slate-100 px-4 py-2.5 text-sm font-medium text-slate-400">
+                  Previous
+                </span>
+              )}
 
-  let query = supabase
-    .from("produce_listings")
-    .select("*", { count: "exact" })
-    .eq("status", "published")
-    .order("created_at", { ascending: false })
-    .range(from, to);
+              <span className="rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white">
+                {page}
+              </span>
 
-  if (params.cityId) {
-    query = query.eq("city_id", params.cityId);
-  }
-
-  if (params.categoryId) {
-    query = query.eq("category_id", params.categoryId);
-  }
-
-  if (typeof params.minPrice === "number" && Number.isFinite(params.minPrice)) {
-    query = query.gte("price", params.minPrice);
-  }
-
-  if (typeof params.maxPrice === "number" && Number.isFinite(params.maxPrice)) {
-    query = query.lte("price", params.maxPrice);
-  }
-
-  const { data, error, count } = await query;
-
-  if (error || !Array.isArray(data)) {
-    return {
-      data: [],
-      count: 0,
-    };
-  }
-
-  return {
-    data: data.map((row) => mapProduceListing(row as Record<string, unknown>)),
-    count: count ?? 0,
-  };
+              {hasNext ? (
+                <a
+                  href={buildPageHref(page + 1, {
+                    cityId: params.cityId,
+                    categoryId: params.categoryId,
+                    minPrice: params.minPrice,
+                    maxPrice: params.maxPrice,
+                  })}
+                  className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+                >
+                  Next
+                </a>
+              ) : (
+                <span className="cursor-not-allowed rounded-xl border border-slate-200 bg-slate-100 px-4 py-2.5 text-sm font-medium text-slate-400">
+                  Next
+                </span>
+              )}
+            </div>
+          </>
+        )}
+      </section>
+    </main>
+  );
 }
