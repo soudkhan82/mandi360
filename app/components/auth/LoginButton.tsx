@@ -1,6 +1,6 @@
 "use client";
 
-import { createClientClient } from "@/app/config/supabase-auth";
+import { createClientBrowser } from "@/app/config/supabase-client";
 
 type Props = {
   next?: string;
@@ -12,7 +12,7 @@ export default function LoginButton({
   label = "Continue with Google",
 }: Props) {
   async function handleLogin() {
-    const supabase = createClientClient();
+    const supabase = createClientBrowser();
 
     const redirectTo = `${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}`;
 
