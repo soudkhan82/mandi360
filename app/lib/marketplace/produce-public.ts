@@ -7,15 +7,16 @@ export type FilterOption = {
 };
 
 export type ProducePublicFilters = {
-  cityIds: FilterOption[];
-  categoryIds: FilterOption[];
+  cities: FilterOption[];
+  categories: FilterOption[];
 };
 
 export type GetPublishedProduceListingsParams = {
   cityId?: string;
   categoryId?: string;
-  minPrice?: number;
-  maxPrice?: number;
+  minPrice?: string;
+  maxPrice?: string;
+  limit?: number;
 };
 
 export type ProducePublicListing = {
@@ -36,11 +37,6 @@ export type ProducePublicListing = {
   sellerName?: string | null;
 };
 
-export type ProducePublicListingsResponse = {
-  data: ProducePublicListing[];
-  count: number;
-};
-
 function normalizeText(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const trimmed = value.trim();
@@ -49,12 +45,10 @@ function normalizeText(value: unknown): string | null {
 
 function normalizeNumber(value: unknown): number | null {
   if (typeof value === "number" && Number.isFinite(value)) return value;
-
   if (typeof value === "string") {
     const parsed = Number(value.replace(/,/g, "").trim());
     return Number.isFinite(parsed) ? parsed : null;
   }
-
   return null;
 }
 
@@ -81,9 +75,9 @@ function pickFirstNumber(
 }
 
 function mapFilterOption(row: Record<string, unknown>): FilterOption | null {
-  const rawId = row.id ?? row.city_id ?? row.category_id ?? row.value;
   const id =
-    typeof rawId === "string" ? rawId.trim() : String(rawId ?? "").trim();
+    pickFirstString(row, ["id", "city_id", "category_id", "value"]) ??
+    String(row.id ?? row.city_id ?? row.category_id ?? row.value ?? "").trim();
 
   const name = pickFirstString(row, [
     "name",
@@ -146,39 +140,34 @@ export async function getProduceFilterOptions(): Promise<ProducePublicFilters> {
       .order("name", { ascending: true }),
   ]);
 
-  const cityIds =
+  const cities =
     citiesRes.error || !Array.isArray(citiesRes.data)
       ? []
       : citiesRes.data
           .map((row) => mapFilterOption(row as Record<string, unknown>))
           .filter((item): item is FilterOption => Boolean(item));
 
-  const categoryIds =
+  const categories =
     categoriesRes.error || !Array.isArray(categoriesRes.data)
       ? []
       : categoriesRes.data
           .map((row) => mapFilterOption(row as Record<string, unknown>))
           .filter((item): item is FilterOption => Boolean(item));
 
-  return { cityIds, categoryIds };
+  return { cities, categories };
 }
 
 export async function getPublishedProduceListings(
   params: GetPublishedProduceListingsParams = {},
-  page = 1,
-  pageSize = 12,
-): Promise<ProducePublicListingsResponse> {
+): Promise<ProducePublicListing[]> {
   const supabase = await createClientServer();
-
-  const from = (page - 1) * pageSize;
-  const to = from + pageSize - 1;
 
   let query = supabase
     .from("produce_listings")
-    .select("*", { count: "exact" })
+    .select("*")
     .eq("status", "published")
     .order("created_at", { ascending: false })
-    .range(from, to);
+    .limit(params.limit ?? 24);
 
   if (params.cityId) {
     query = query.eq("city_id", params.cityId);
@@ -188,25 +177,25 @@ export async function getPublishedProduceListings(
     query = query.eq("category_id", params.categoryId);
   }
 
-  if (typeof params.minPrice === "number" && Number.isFinite(params.minPrice)) {
-    query = query.gte("price", params.minPrice);
+  if (params.minPrice && params.minPrice.trim() !== "") {
+    const min = Number(params.minPrice);
+    if (Number.isFinite(min)) {
+      query = query.gte("price", min);
+    }
   }
 
-  if (typeof params.maxPrice === "number" && Number.isFinite(params.maxPrice)) {
-    query = query.lte("price", params.maxPrice);
+  if (params.maxPrice && params.maxPrice.trim() !== "") {
+    const max = Number(params.maxPrice);
+    if (Number.isFinite(max)) {
+      query = query.lte("price", max);
+    }
   }
 
-  const { data, error, count } = await query;
+  const { data, error } = await query;
 
   if (error || !Array.isArray(data)) {
-    return {
-      data: [],
-      count: 0,
-    };
+    return [];
   }
 
-  return {
-    data: data.map((row) => mapProduceListing(row as Record<string, unknown>)),
-    count: count ?? 0,
-  };
+  return data.map((row) => mapProduceListing(row as Record<string, unknown>));
 }
