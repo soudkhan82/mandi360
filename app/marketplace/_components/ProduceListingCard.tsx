@@ -1,10 +1,7 @@
 import Link from "next/link";
 import { MapPin, Clock3, Package2 } from "lucide-react";
 import type { ProduceListingCard as ProduceListingCardType } from "@/app/types/marketplace";
-import {
-  formatPostedTime,
-  formatPrice,
-} from "@/public/images/categories/marketplace/format";
+import { formatPostedTime, formatPrice } from "@/app/lib/marketplace/format";
 
 type Props = {
   listing?: ProduceListingCardType | null;
@@ -24,7 +21,7 @@ export default function ProduceListingCard({ listing }: Props) {
       href={href}
       className="group block overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:shadow-lg"
     >
-      <div className="relative h-48 w-full overflow-hidden bg-gradient-to-br from-emerald-50 via-white to-slate-50">
+      <div className="relative h-48 w-full overflow-hidden bg-linear-to-br from-emerald-50 via-white to-slate-50">
         <div className="flex h-full w-full items-center justify-center">
           <div className="flex flex-col items-center gap-2 text-slate-400">
             <Package2 className="h-10 w-10" />
