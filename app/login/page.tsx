@@ -1,25 +1,33 @@
-import LoginButton from "@/app/components/auth/LoginButton";
+"use client";
 
-export default async function LoginPage({
-  searchParams,
-}: {
-  searchParams: Promise<{ next?: string }>;
-}) {
-  const params = await searchParams;
-  const next = params?.next || "/";
+import { createClientBrowser } from "@/app/lib/supabase/browser";
+
+export default function LoginPage() {
+  async function handleGoogleLogin() {
+    const supabase = createClientBrowser();
+
+    await supabase.auth.signInWithOAuth({
+      provider: "google",
+      options: {
+        redirectTo: `${window.location.origin}/auth/callback`,
+      },
+    });
+  }
 
   return (
-    <main className="mx-auto max-w-md px-4 py-16">
-      <div className="rounded-xl border p-6 shadow-sm">
-        <h1 className="text-2xl font-semibold">Login</h1>
-        <p className="mt-2 text-sm text-gray-600">
-          Browsing is public. Login is only required for posting and account
-          actions.
+    <main className="min-h-[calc(100vh-80px)] bg-[#020817] px-4 py-16 text-white">
+      <div className="mx-auto max-w-md rounded-3xl border border-slate-800 bg-[#050b18] p-8 shadow-2xl">
+        <h1 className="text-3xl font-bold">Login</h1>
+        <p className="mt-3 text-slate-400">
+          Continue with your Google account to post and manage listings.
         </p>
 
-        <div className="mt-6">
-          <LoginButton next={next} />
-        </div>
+        <button
+          onClick={handleGoogleLogin}
+          className="mt-6 w-full rounded-2xl bg-emerald-400 px-5 py-3 font-semibold text-black transition hover:opacity-90"
+        >
+          Continue with Google
+        </button>
       </div>
     </main>
   );
