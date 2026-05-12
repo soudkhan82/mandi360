@@ -1,6 +1,6 @@
-import LogisticsFilters from "../lib/marketplace/logistics/components/LogisticsFilters";
-import LogisticsHero from "../lib/marketplace/logistics/components/LogisticsHero";
-import LogisticsListingGrid from "../lib/marketplace/logistics/components/LogisticsListingGrid";
+import LogisticsFilters from "./components/LogisticsFilters";
+import LogisticsHero from "./components/LogisticsHero";
+import LogisticsListingGrid from "./components/LogisticsListingGrid";
 import {
   fetchLogisticsFilterOptions,
   fetchLogisticsListings,
