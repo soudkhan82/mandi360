@@ -1,10 +1,17 @@
 import { create } from "zustand";
-import type { User } from "@supabase/supabase-js";
+
+export type AppUser = {
+  id: string;
+  email: string | null;
+  full_name: string | null;
+  phone: string | null;
+  role: string | null;
+};
 
 type AuthState = {
-  user: User | null;
+  user: AppUser | null;
   loading: boolean;
-  setUser: (user: User | null) => void;
+  setUser: (user: AppUser | null) => void;
   setLoading: (loading: boolean) => void;
   clearAuth: () => void;
 };
