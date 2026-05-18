@@ -1,50 +1,18 @@
-import Image from "next/image";
 import Link from "next/link";
-import { redirect } from "next/navigation";
-import { createClientServer } from "@/app/lib/supabase/server";
-import { getListingPreviewUrl } from "@/app/lib/listing-image";
+import { createClientServer } from "@/app/config/supabase-server";
 
-type ListingRow = {
+export const dynamic = "force-dynamic";
+
+type MyBuyerListing = {
   id: string;
-  title: string | null;
-  slug: string | null;
-  description: string | null;
-  quantity: number | null;
-  quantity_unit: string | null;
-  price_per_unit: number | null;
-  price_unit: string | null;
-  status: string | null;
-  created_at: string | null;
-  image_urls: string[] | string | null;
+  title: string;
+  slug: string;
+  buyer_type: string;
+  product_needed: string;
+  city: string;
+  status: string;
+  created_at: string;
 };
-
-function formatDate(value: string | null) {
-  if (!value) return "-";
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return "-";
-
-  return d.toLocaleDateString("en-PK", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-  });
-}
-
-function statusClasses(status: string | null) {
-  const s = (status || "").toLowerCase();
-
-  if (s === "published") {
-    return "border-emerald-500/30 bg-emerald-500/10 text-emerald-300";
-  }
-  if (s === "rejected") {
-    return "border-rose-500/30 bg-rose-500/10 text-rose-300";
-  }
-  if (s === "paused") {
-    return "border-amber-500/30 bg-amber-500/10 text-amber-300";
-  }
-
-  return "border-cyan-500/30 bg-cyan-500/10 text-cyan-300";
-}
 
 export default async function MyListingsPage() {
   const supabase = await createClientServer();
@@ -54,163 +22,97 @@ export default async function MyListingsPage() {
   } = await supabase.auth.getUser();
 
   if (!user) {
-    redirect("/auth/login");
-  }
-
-  const { data, error } = await supabase
-    .from("produce_listings")
-    .select(
-      `
-      id,
-      title,
-      slug,
-      description,
-      quantity,
-      quantity_unit,
-      price_per_unit,
-      price_unit,
-      status,
-      created_at,
-      image_urls
-    `,
-    )
-    .eq("user_id", user.id)
-    .order("created_at", { ascending: false });
-
-  if (error) {
     return (
-      <main className="min-h-[calc(100vh-80px)] bg-[#020817] px-4 py-10 text-white">
-        <div className="mx-auto max-w-6xl rounded-3xl border border-rose-500/30 bg-rose-500/10 p-6 text-rose-300">
-          Failed to load listings: {error.message}
+      <main className="min-h-screen bg-[#f5f5f5] px-6 py-10">
+        <div className="mx-auto max-w-4xl rounded-xl border bg-white p-6">
+          <h1 className="text-xl font-black text-slate-950">Login required</h1>
+          <Link href="/auth/login" className="mt-3 inline-block text-sm font-bold text-green-700">
+            Go to login
+          </Link>
         </div>
       </main>
     );
   }
 
-  const listings = (data || []) as ListingRow[];
+  const { data, error } = await supabase
+    .from("buyer_listings")
+    .select("id,title,slug,buyer_type,product_needed,city,status,created_at")
+    .eq("user_id", user.id)
+    .order("created_at", { ascending: false });
+
+  const listings = (data ?? []) as MyBuyerListing[];
 
   return (
-    <main className="min-h-[calc(100vh-80px)] bg-[#020817] text-white">
-      <div className="mx-auto max-w-6xl px-4 py-10">
-        <div className="mb-8 flex items-end justify-between">
+    <main className="min-h-screen bg-[#f5f5f5] px-6 py-10">
+      <section className="mx-auto max-w-6xl">
+        <div className="mb-6 flex items-center justify-between gap-4">
           <div>
-            <h1 className="text-3xl font-bold tracking-tight">My Listings</h1>
-            <p className="mt-2 text-sm text-slate-400">
-              View and manage your submitted ads
+            <h1 className="text-3xl font-black text-slate-950">My Listings</h1>
+            <p className="mt-1 text-sm text-slate-600">
+              Manage your submitted ads and approval status.
             </p>
           </div>
 
           <Link
             href="/post-ad"
-            className="rounded-full bg-emerald-400 px-5 py-2.5 text-sm font-semibold text-black"
+            className="rounded-lg bg-green-600 px-5 py-3 text-sm font-bold text-white hover:bg-green-700"
           >
-            Post New Ad
+            Post Ad
           </Link>
         </div>
 
-        {listings.length === 0 ? (
-          <div className="rounded-3xl border border-slate-800 bg-[#050b18] p-10 text-center shadow-2xl">
-            <h2 className="text-xl font-semibold text-white">
-              No listings yet
-            </h2>
-            <p className="mt-2 text-slate-400">
-              You have not posted any ads yet.
+        {error ? (
+          <div className="rounded-xl border bg-white p-6 text-red-600">
+            {error.message}
+          </div>
+        ) : listings.length === 0 ? (
+          <div className="rounded-xl border bg-white p-8 text-center">
+            <h2 className="text-lg font-black text-slate-950">No listings yet</h2>
+            <p className="mt-2 text-sm text-slate-600">
+              Your submitted ads will appear here.
             </p>
           </div>
         ) : (
-          <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
-            {listings.map((item) => {
-              const preview = getListingPreviewUrl(item);
+          <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+            <table className="w-full text-left text-sm">
+              <thead className="bg-slate-50 text-xs uppercase text-slate-500">
+                <tr>
+                  <th className="px-4 py-3">Module</th>
+                  <th className="px-4 py-3">Title</th>
+                  <th className="px-4 py-3">Product</th>
+                  <th className="px-4 py-3">City</th>
+                  <th className="px-4 py-3">Status</th>
+                  <th className="px-4 py-3 text-right">Action</th>
+                </tr>
+              </thead>
 
-              return (
-                <div
-                  key={item.id}
-                  className="overflow-hidden rounded-3xl border border-slate-800 bg-[#050b18] shadow-2xl"
-                >
-                  <div className="relative h-56 w-full bg-slate-900">
-                    {preview ? (
-                      <Image
-                        src={preview}
-                        alt={item.title || "Listing image"}
-                        fill
-                        className="object-cover"
-                        unoptimized
-                      />
-                    ) : (
-                      <div className="flex h-full items-center justify-center text-slate-500">
-                        No image available
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="p-5">
-                    <div className="mb-3 flex items-center justify-between gap-3">
-                      <h2 className="line-clamp-1 text-xl font-semibold text-white">
-                        {item.title || "Untitled Listing"}
-                      </h2>
-
-                      <span
-                        className={`rounded-full border px-3 py-1 text-xs font-semibold uppercase ${statusClasses(
-                          item.status,
-                        )}`}
-                      >
-                        {item.status || "draft"}
+              <tbody>
+                {listings.map((item) => (
+                  <tr key={item.id} className="border-t">
+                    <td className="px-4 py-3 font-semibold text-slate-700">Buyers</td>
+                    <td className="px-4 py-3 font-bold text-slate-950">{item.title}</td>
+                    <td className="px-4 py-3 text-slate-700">{item.product_needed}</td>
+                    <td className="px-4 py-3 text-slate-700">{item.city}</td>
+                    <td className="px-4 py-3">
+                      <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-bold capitalize text-slate-700">
+                        {item.status}
                       </span>
-                    </div>
-
-                    <p className="mb-4 line-clamp-2 text-sm text-slate-300">
-                      {item.description || "No description available"}
-                    </p>
-
-                    <div className="grid gap-3 sm:grid-cols-2">
-                      <div className="rounded-2xl border border-slate-800 bg-black/30 p-3">
-                        <p className="text-xs uppercase tracking-wide text-slate-500">
-                          Quantity
-                        </p>
-                        <p className="mt-1 text-sm font-semibold text-white">
-                          {item.quantity ?? "-"} {item.quantity_unit || ""}
-                        </p>
-                      </div>
-
-                      <div className="rounded-2xl border border-slate-800 bg-black/30 p-3">
-                        <p className="text-xs uppercase tracking-wide text-slate-500">
-                          Price
-                        </p>
-                        <p className="mt-1 text-sm font-semibold text-white">
-                          PKR {item.price_per_unit ?? "-"}
-                          {item.price_unit ? ` / ${item.price_unit}` : ""}
-                        </p>
-                      </div>
-                    </div>
-
-                    <div className="mt-4 text-sm text-slate-400">
-                      Created: {formatDate(item.created_at)}
-                    </div>
-
-                    <div className="mt-5 flex gap-3">
+                    </td>
+                    <td className="px-4 py-3 text-right">
                       <Link
-                        href={`/my-listings/${item.id}/edit`}
-                        className="rounded-full border border-slate-700 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-800"
+                        href={`/listing/${item.slug}`}
+                        className="font-bold text-green-700 hover:underline"
                       >
-                        Edit
+                        View
                       </Link>
-
-                      {item.slug && item.status === "published" && (
-                        <Link
-                          href={`/produce/${item.slug}`}
-                          className="rounded-full bg-cyan-400 px-4 py-2 text-sm font-semibold text-black transition hover:opacity-90"
-                        >
-                          View Live
-                        </Link>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         )}
-      </div>
+      </section>
     </main>
   );
 }

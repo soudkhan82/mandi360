@@ -1,186 +1,150 @@
 import { NextResponse } from "next/server";
-import { createClientServer } from "@/app/lib/supabase/server";
+import { createClientServer } from "@/app/config/supabase-server";
 
-function makeSlug(title: string) {
-  const base = title
+const BUYER_FALLBACK_IMAGE = "/images/buyer-placeholder.jpg";
+
+function makeSlug(value: string) {
+  const base = value
     .toLowerCase()
-    .replace(/[^a-z0-9\s-]/g, "")
     .trim()
-    .replace(/\s+/g, "-")
-    .replace(/-+/g, "-");
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
 
-  return `${base}-${Math.random().toString(36).slice(2, 8)}`;
+  const suffix = Math.random().toString(36).slice(2, 8);
+  return `${base || "listing"}-${suffix}`;
 }
 
-function toNumber(value: FormDataEntryValue | null) {
-  if (value == null || value === "") return null;
-  const num = Number(value);
-  return Number.isFinite(num) ? num : null;
+function safeFileName(name: string) {
+  const cleaned = name
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9.]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-+|-+$/g, "");
+
+  return cleaned || "buyer-image";
 }
 
-function toText(value: FormDataEntryValue | null) {
-  if (value == null) return null;
-  const text = String(value).trim();
-  return text.length ? text : null;
+function isValidImageFile(value: FormDataEntryValue | null): value is File {
+  return (
+    value instanceof File && value.size > 0 && value.type.startsWith("image/")
+  );
 }
 
-export async function POST(req: Request) {
+export async function POST(request: Request) {
   const supabase = await createClientServer();
 
   const {
     data: { user },
+    error: userError,
   } = await supabase.auth.getUser();
 
-  if (!user) {
-    return NextResponse.redirect(
-      new URL("/auth/login?next=/post-ad", req.url),
-      303,
+  if (userError || !user) {
+    return NextResponse.redirect(new URL("/auth/login", request.url), 303);
+  }
+
+  const formData = await request.formData();
+
+  const module = String(formData.get("module") ?? "").trim();
+
+  if (module !== "buyers") {
+    return NextResponse.json(
+      {
+        error: "Unsupported module. Only buyers module is currently enabled.",
+      },
+      { status: 400 },
     );
   }
 
-  const formData = await req.formData();
-
-  const intent = String(formData.get("_intent") || "submit").trim();
-  const title = String(formData.get("title") || "").trim();
-  const description = String(formData.get("description") || "").trim();
-  const city_id = String(formData.get("city_id") || "").trim();
-  const category_id = String(formData.get("category_id") || "").trim();
-  const quantity = toNumber(formData.get("quantity"));
-  const quantity_unit = toText(formData.get("quantity_unit"));
-  const price_per_unit = toNumber(formData.get("price_per_unit"));
-  const price_unit = toText(formData.get("price_unit"));
-  const contact_name = toText(formData.get("contact_name"));
-  const contact_phone = toText(formData.get("contact_phone"));
-  const minimum_order_quantity = toNumber(
-    formData.get("minimum_order_quantity"),
-  );
-  const variety = toText(formData.get("variety"));
-  const grade = toText(formData.get("grade"));
-  const packaging_details = toText(formData.get("packaging_details"));
-  const is_organic = formData.get("is_organic") === "true";
+  const title = String(formData.get("title") ?? "").trim();
+  const buyer_type = String(formData.get("buyer_type") ?? "").trim();
+  const product_category = String(
+    formData.get("product_category") ?? "",
+  ).trim();
+  const product_needed = String(formData.get("product_needed") ?? "").trim();
+  const quantity = String(formData.get("quantity") ?? "").trim();
+  const city = String(formData.get("city") ?? "").trim();
+  const phone = String(formData.get("phone") ?? "").trim();
+  const description = String(formData.get("description") ?? "").trim();
 
   if (
     !title ||
-    !description ||
-    !city_id ||
-    !category_id ||
-    quantity == null ||
-    !quantity_unit ||
-    price_per_unit == null ||
-    !price_unit
+    !buyer_type ||
+    !product_category ||
+    !product_needed ||
+    !city ||
+    !phone
   ) {
-    return NextResponse.redirect(
-      new URL(
-        `/post-ad?error=${encodeURIComponent("Please fill all required fields.")}`,
-        req.url,
-      ),
-      303,
+    return NextResponse.json(
+      {
+        error: "Missing required buyer fields.",
+      },
+      { status: 400 },
     );
   }
 
-  const rawFiles = formData.getAll("images");
-  const imageFiles = rawFiles.filter(
-    (value): value is File => value instanceof File && value.size > 0,
-  );
+  let imageUrls: string[] = [BUYER_FALLBACK_IMAGE];
 
-  console.log(
-    "POST-AD DEBUG incoming files:",
-    imageFiles.map((f) => ({
-      name: f.name,
-      size: f.size,
-      type: f.type,
-    })),
-  );
+  const image = formData.get("image");
 
-  const uploadedUrls: string[] = [];
+  if (isValidImageFile(image)) {
+    const originalExt = image.name.split(".").pop();
+    const ext = originalExt ? originalExt.toLowerCase() : "jpg";
 
-  for (const file of imageFiles) {
-    console.log("POST-AD DEBUG uploading file:", file.name);
+    const filePath = `${user.id}/${Date.now()}-${safeFileName(title)}.${ext}`;
 
-    const ext = file.name.split(".").pop() || "jpg";
-    const filePath = `${user.id}/${Date.now()}-${Math.random()
-      .toString(36)
-      .slice(2)}.${ext}`;
-
-    const { data: uploadData, error: uploadError } = await supabase.storage
-      .from("produce-images")
-      .upload(filePath, file, {
+    const { error: uploadError } = await supabase.storage
+      .from("buyer-images")
+      .upload(filePath, image, {
         cacheControl: "3600",
         upsert: false,
+        contentType: image.type || "image/jpeg",
       });
 
     if (uploadError) {
-      console.error("POST-AD DEBUG upload error:", uploadError.message);
-
-      return NextResponse.redirect(
-        new URL(
-          `/post-ad?error=${encodeURIComponent(`Image upload failed: ${uploadError.message}`)}`,
-          req.url,
-        ),
-        303,
+      return NextResponse.json(
+        {
+          error: uploadError.message,
+        },
+        { status: 500 },
       );
     }
 
-    console.log("POST-AD DEBUG upload path:", uploadData.path);
-
     const { data: publicUrlData } = supabase.storage
-      .from("produce-images")
-      .getPublicUrl(uploadData.path);
+      .from("buyer-images")
+      .getPublicUrl(filePath);
 
-    console.log("POST-AD DEBUG public URL:", publicUrlData.publicUrl);
-
-    uploadedUrls.push(publicUrlData.publicUrl);
+    if (publicUrlData?.publicUrl) {
+      imageUrls = [publicUrlData.publicUrl];
+    }
   }
 
-  console.log("POST-AD DEBUG final uploadedUrls:", uploadedUrls);
+  const finalDescription = description
+    ? `${description}\n\nCategory: ${product_category}`
+    : `Category: ${product_category}`;
 
-  const slug = makeSlug(title);
-  const status = intent === "draft" ? "draft" : "pending";
-
-  const payload = {
+  const { error } = await supabase.from("buyer_listings").insert({
     user_id: user.id,
     title,
-    slug,
-    description,
-    city_id,
-    category_id,
-    quantity,
-    quantity_unit,
-    price_per_unit,
-    price_unit,
-    contact_name,
-    contact_phone,
-    minimum_order_quantity,
-    variety,
-    grade,
-    packaging_details,
-    is_organic,
-    status,
-    image_urls: uploadedUrls,
-  };
-
-  console.log("POST-AD DEBUG insert payload:", payload);
-
-  const { error } = await supabase.from("produce_listings").insert(payload);
+    slug: makeSlug(title),
+    buyer_type,
+    product_needed,
+    quantity: quantity || null,
+    city,
+    phone,
+    description: finalDescription,
+    status: "pending",
+    image_urls: imageUrls,
+  });
 
   if (error) {
-    console.error("POST-AD DEBUG insert error:", error.message);
-
-    return NextResponse.redirect(
-      new URL(`/post-ad?error=${encodeURIComponent(error.message)}`, req.url),
-      303,
+    return NextResponse.json(
+      {
+        error: error.message,
+      },
+      { status: 500 },
     );
   }
 
-  return NextResponse.redirect(
-    new URL(
-      `/my-listings?success=${encodeURIComponent(
-        status === "draft"
-          ? "Listing saved as draft."
-          : "Listing submitted successfully.",
-      )}`,
-      req.url,
-    ),
-    303,
-  );
+  return NextResponse.redirect(new URL("/my-listings", request.url), 303);
 }

@@ -1,4 +1,4 @@
-// app/config/marketplace-nav.ts
+﻿// app/config/marketplace-nav.ts
 import {
   Wheat,
   Truck,
@@ -65,7 +65,7 @@ export const marketplaceSegments: SegmentCard[] = [
     title: "Post Listing",
     description:
       "Create a listing for produce, transport, services, or agri inputs. Login required only for posting.",
-    href: "/post-listing",
+    href: "/post-ad",
     icon: PlusCircle,
     badge: "Login Required",
   },
@@ -88,3 +88,4 @@ export const marketplaceHighlights = [
       "Farmers, wholesalers, logistics providers, consultants, labour, and suppliers on one platform.",
   },
 ];
+

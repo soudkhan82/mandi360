@@ -1,110 +1,86 @@
 import Link from "next/link";
 
-const adTypes = [
+const modules = [
   {
-    title: "Sell Produce",
-    description:
-      "Post fruits, vegetables, grains or mandi produce with quantity, price and crop details.",
+    title: "Produce",
     href: "/post-ad/produce",
-    badge: "Produce",
+    description: "Sell fruits, vegetables, crops and fresh farm produce.",
+    disabled: true,
   },
   {
-    title: "Offer Logistics",
-    description:
-      "Post pickup, truck, reefer, loader or route-based transport service.",
-    href: "/logistics/post",
-    badge: "Transport",
+    title: "Logistics",
+    href: "/post-ad/logistics",
+    description: "Offer transport, loading, cold chain and delivery services.",
+    disabled: true,
+  },
+  {
+    title: "Consultants",
+    href: "/post-ad/consultants",
+    description: "Offer crop, farm, soil and agri business consulting.",
+    disabled: true,
   },
   {
     title: "Agri Inputs",
-    description:
-      "Post seeds, fertilizers, pesticides, tools, machinery parts or supplier items.",
-    href: "/agri-inputs/post",
-    badge: "Inputs",
+    href: "/post-ad/agri-inputs",
+    description: "Sell seeds, fertilizers, pesticides, machinery and tools.",
+    disabled: true,
   },
   {
-    title: "Services / Consultants",
-    description:
-      "Post labour, packaging, agri consultancy, harvesting or support services.",
-    href: "/services/post",
-    badge: "Services",
+    title: "Buyers",
+    href: "/post-ad/buyers",
+    description: "Post purchase requirements for agri products.",
+    disabled: false,
+  },
+  {
+    title: "Labour & Packaging",
+    href: "/post-ad/labour-packaging",
+    description: "Offer labour, packing, grading and handling services.",
+    disabled: true,
   },
 ];
 
-export default function PostAdSelectorPage() {
+export default function PostAdPage() {
   return (
-    <main className="min-h-screen bg-black px-4 py-10 text-white">
-      <div className="mx-auto max-w-6xl">
-        <div className="mb-8">
-          <p className="text-sm font-semibold uppercase tracking-[0.25em] text-emerald-300">
-            Create Marketplace Listing
-          </p>
+    <main className="min-h-screen bg-[#f5f5f5] px-6 py-10">
+      <section className="mx-auto max-w-6xl">
+        <h1 className="text-3xl font-black text-slate-950">Post Free Ad</h1>
+        <p className="mt-1 text-sm text-slate-600">
+          Select a marketplace module.
+        </p>
 
-          <h1 className="mt-2 text-3xl font-bold sm:text-4xl">
-            What do you want to post?
-          </h1>
+        <div className="mt-6 grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+          {modules.map((item) => {
+            const card = (
+              <div className="h-full rounded-xl border border-slate-200 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md">
+                <h2 className="text-xl font-black text-slate-950">
+                  {item.title}
+                </h2>
+                <p className="mt-2 text-sm text-slate-600">
+                  {item.description}
+                </p>
 
-          <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-400">
-            Choose the correct ad type so the form matches the right database
-            table and business segment.
-          </p>
-        </div>
-
-        <div className="grid gap-5 md:grid-cols-2">
-          {adTypes.map((item) => (
-            <Link
-              key={item.href}
-              href={item.href}
-              className="group rounded-3xl border border-slate-800 bg-slate-950 p-6 shadow-2xl shadow-black/30 transition hover:-translate-y-0.5 hover:border-emerald-500/50"
-            >
-              <div className="mb-5 flex items-center justify-between gap-3">
-                <span className="rounded-full border border-emerald-400/20 bg-emerald-400/10 px-3 py-1 text-xs font-bold uppercase tracking-wider text-emerald-300">
-                  {item.badge}
-                </span>
-
-                <span className="rounded-full border border-slate-700 px-3 py-1 text-xs font-semibold text-slate-300 transition group-hover:border-emerald-400 group-hover:text-white">
-                  Open Form →
-                </span>
+                <div className="mt-5 text-sm font-bold text-green-700">
+                  {item.disabled ? "Coming soon" : "Continue →"}
+                </div>
               </div>
+            );
 
-              <h2 className="text-xl font-bold text-white">{item.title}</h2>
+            if (item.disabled) {
+              return (
+                <div key={item.title} className="opacity-60">
+                  {card}
+                </div>
+              );
+            }
 
-              <p className="mt-3 text-sm leading-6 text-slate-400">
-                {item.description}
-              </p>
-            </Link>
-          ))}
+            return (
+              <Link key={item.title} href={item.href}>
+                {card}
+              </Link>
+            );
+          })}
         </div>
-
-        <div className="mt-8 rounded-2xl border border-slate-800 bg-slate-950 p-5">
-          <p className="text-sm font-semibold text-white">Route logic</p>
-
-          <div className="mt-3 grid gap-2 text-sm text-slate-400 sm:grid-cols-2">
-            <p>
-              <span className="font-semibold text-emerald-300">/post-ad</span> =
-              choose listing type
-            </p>
-            <p>
-              <span className="font-semibold text-emerald-300">
-                /post-ad/produce
-              </span>{" "}
-              = produce form
-            </p>
-            <p>
-              <span className="font-semibold text-emerald-300">
-                /logistics/post
-              </span>{" "}
-              = logistics form
-            </p>
-            <p>
-              <span className="font-semibold text-emerald-300">
-                /agri-inputs/post
-              </span>{" "}
-              = agri inputs form later
-            </p>
-          </div>
-        </div>
-      </div>
+      </section>
     </main>
   );
 }
