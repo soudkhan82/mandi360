@@ -1,38 +1,23 @@
-"use client";
+import { Suspense } from "react";
+import LoginPageClient from "./LoginPageClient";
 
-import { useSearchParams } from "next/navigation";
-import { createClientBrowser } from "@/app/lib/supabase/browser";
+export const dynamic = "force-dynamic";
 
 export default function LoginPage() {
-  const searchParams = useSearchParams();
-  const next = searchParams.get("next") || "/";
-
-  async function handleGoogleLogin() {
-    const supabase = createClientBrowser();
-
-    await supabase.auth.signInWithOAuth({
-      provider: "google",
-      options: {
-        redirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}`,
-      },
-    });
-  }
-
   return (
-    <main className="flex min-h-[calc(100vh-64px)] items-center justify-center bg-[#020817] px-4">
-      <div className="w-full max-w-md rounded-3xl border border-slate-800 bg-slate-950 p-8 shadow-2xl">
-        <h1 className="mb-2 text-3xl font-bold text-white">Sign in</h1>
-        <p className="mb-6 text-sm text-slate-400">
-          Continue with Google to post listings and manage your account.
-        </p>
-
-        <button
-          onClick={handleGoogleLogin}
-          className="w-full rounded-xl bg-emerald-500 px-4 py-3 font-semibold text-black hover:bg-emerald-400"
-        >
-          Continue with Google
-        </button>
-      </div>
-    </main>
+    <Suspense
+      fallback={
+        <main className="flex min-h-[calc(100vh-64px)] items-center justify-center bg-[#020817] px-4">
+          <div className="w-full max-w-md rounded-3xl border border-slate-800 bg-slate-950 p-8 text-center shadow-2xl">
+            <div className="mx-auto mb-4 h-8 w-8 animate-spin rounded-full border-4 border-slate-700 border-t-emerald-400" />
+            <p className="text-sm font-semibold text-slate-300">
+              Loading login...
+            </p>
+          </div>
+        </main>
+      }
+    >
+      <LoginPageClient />
+    </Suspense>
   );
 }
