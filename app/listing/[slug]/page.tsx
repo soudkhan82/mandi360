@@ -12,13 +12,55 @@ type PageProps = {
   }>;
 };
 
+type ListingResult = {
+  moduleKey: string;
+  moduleLabel: string;
+  backHref: string;
+  row: AnyRow;
+};
+
+const LISTING_SOURCES = [
+  {
+    table: "produce_listings",
+    moduleKey: "produce",
+    moduleLabel: "Produce",
+    backHref: "/produce",
+  },
+  {
+    table: "logistics_listings",
+    moduleKey: "logistics",
+    moduleLabel: "Logistics",
+    backHref: "/logistics",
+  },
+  {
+    table: "service_listings",
+    moduleKey: "consultants",
+    moduleLabel: "Consultants",
+    backHref: "/consultants",
+  },
+  {
+    table: "input_supplier_listings",
+    moduleKey: "agri-inputs",
+    moduleLabel: "Agri Inputs",
+    backHref: "/agri-inputs",
+  },
+  {
+    table: "buyer_listings",
+    moduleKey: "buyers",
+    moduleLabel: "Buyers",
+    backHref: "/buyers",
+  },
+];
+
 function pick(row: AnyRow, keys: string[], fallback = "-") {
   for (const key of keys) {
     const value = row?.[key];
+
     if (value !== null && value !== undefined && String(value).trim() !== "") {
       return String(value);
     }
   }
+
   return fallback;
 }
 
@@ -27,38 +69,90 @@ function getImages(row: AnyRow) {
   if (Array.isArray(row.images)) return row.images.filter(Boolean);
   if (row.image_url) return [row.image_url];
   if (row.cover_image) return [row.cover_image];
+
   return [];
 }
 
-async function findListingBySlug(slug: string) {
-  const supabase = await createClientServer();
+function getProductText(moduleKey: string, row: AnyRow) {
+  if (moduleKey === "produce") {
+    const cropVariety = [row.crop, row.variety].filter(Boolean).join(" / ");
 
-  const { data: produce } = await supabase
-    .from("produce_listings")
-    .select("*")
-    .eq("slug", slug)
-    .maybeSingle();
-
-  if (produce) {
-    return {
-      moduleKey: "produce",
-      moduleLabel: "Produce",
-      row: produce as AnyRow,
-    };
+    return (
+      cropVariety ||
+      pick(row, ["product", "product_name", "category", "crop"], "-")
+    );
   }
 
-  const { data: buyer } = await supabase
-    .from("buyer_listings")
-    .select("*")
-    .eq("slug", slug)
-    .maybeSingle();
+  if (moduleKey === "logistics") {
+    return pick(row, [
+      "category",
+      "vehicle_type",
+      "service_type",
+      "service",
+      "product",
+      "title",
+    ]);
+  }
 
-  if (buyer) {
-    return {
-      moduleKey: "buyers",
-      moduleLabel: "Buyers",
-      row: buyer as AnyRow,
-    };
+  if (moduleKey === "consultants") {
+    return pick(row, [
+      "category",
+      "consulting_type",
+      "service_type",
+      "specialization",
+      "service",
+      "title",
+    ]);
+  }
+
+  if (moduleKey === "agri-inputs") {
+    return pick(row, [
+      "category",
+      "input_type",
+      "product",
+      "product_name",
+      "brand",
+      "title",
+    ]);
+  }
+
+  if (moduleKey === "buyers") {
+    return pick(row, [
+      "product_needed",
+      "product_category",
+      "product",
+      "required_product",
+      "requirement",
+      "title",
+    ]);
+  }
+
+  return pick(row, ["category", "product", "product_name", "title"]);
+}
+
+async function findListingBySlug(slug: string): Promise<ListingResult | null> {
+  const supabase = await createClientServer();
+
+  for (const source of LISTING_SOURCES) {
+    const { data, error } = await supabase
+      .from(source.table)
+      .select("*")
+      .eq("slug", slug)
+      .maybeSingle();
+
+    if (error) {
+      console.error(`Listing detail fetch error from ${source.table}:`, error);
+      continue;
+    }
+
+    if (data) {
+      return {
+        moduleKey: source.moduleKey,
+        moduleLabel: source.moduleLabel,
+        backHref: source.backHref,
+        row: data as AnyRow,
+      };
+    }
   }
 
   return null;
@@ -73,31 +167,26 @@ export default async function ListingDetailPage({ params }: PageProps) {
     notFound();
   }
 
-  const { moduleKey, moduleLabel, row } = result;
+  const { moduleKey, moduleLabel, backHref, row } = result;
 
   const title = pick(row, ["title", "buyer_title", "requirement_title"]);
-  const city = pick(row, ["city", "location"]);
+  const city = pick(row, ["city", "location", "service_area", "area"]);
   const phone = pick(row, ["phone", "mobile", "contact", "contact_number"]);
   const description = pick(row, ["description", "details", "requirement"], "");
   const status = pick(row, ["status"], "pending");
   const images = getImages(row);
 
-  const product =
-    moduleKey === "produce"
-      ? [row.crop, row.variety].filter(Boolean).join(" / ") ||
-        pick(row, ["product", "product_name", "category"])
-      : pick(row, [
-          "product",
-          "product_name",
-          "required_product",
-          "requirement",
-          "category",
-          "description",
-          "details",
-        ]);
-
-  const price = pick(row, ["price", "expected_price", "budget"], "");
-  const quantity = pick(row, ["quantity", "required_quantity", "qty"], "");
+  const product = getProductText(moduleKey, row);
+  const price = pick(
+    row,
+    ["price", "rate", "expected_price", "budget", "fee"],
+    "",
+  );
+  const quantity = pick(
+    row,
+    ["quantity", "capacity", "required_quantity", "qty"],
+    "",
+  );
   const unit = pick(row, ["unit", "uom"], "");
 
   return (
@@ -115,16 +204,17 @@ export default async function ListingDetailPage({ params }: PageProps) {
           </div>
 
           <Link
-            href="/my-listings"
+            href={backHref}
             className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-black text-slate-800 hover:bg-slate-50"
           >
-            Back to My Listings
+            Back to {moduleLabel}
           </Link>
         </div>
 
         <div className="grid gap-6 lg:grid-cols-[1.2fr_0.8fr]">
           <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
             {images.length > 0 ? (
+              // eslint-disable-next-line @next/next/no-img-element
               <img
                 src={images[0]}
                 alt={title}
@@ -139,6 +229,7 @@ export default async function ListingDetailPage({ params }: PageProps) {
             {images.length > 1 ? (
               <div className="grid grid-cols-4 gap-2 p-3">
                 {images.slice(1, 5).map((img: string, index: number) => (
+                  // eslint-disable-next-line @next/next/no-img-element
                   <img
                     key={`${img}-${index}`}
                     src={img}
@@ -161,18 +252,20 @@ export default async function ListingDetailPage({ params }: PageProps) {
 
             <div className="mt-5 grid gap-3">
               <Info label="Module" value={moduleLabel} />
-              <Info label="Product" value={product} />
+              <Info label="Product / Service" value={product} />
               <Info label="City" value={city} />
               <Info label="Phone" value={phone} />
 
               {quantity || unit ? (
                 <Info
-                  label="Quantity"
+                  label={moduleKey === "logistics" ? "Capacity" : "Quantity"}
                   value={`${quantity || "-"} ${unit || ""}`.trim()}
                 />
               ) : null}
 
-              {price ? <Info label="Price" value={`Rs ${price}`} /> : null}
+              {price ? (
+                <Info label="Price / Rate" value={`Rs ${price}`} />
+              ) : null}
             </div>
 
             {description ? (

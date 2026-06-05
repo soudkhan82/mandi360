@@ -1,8 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClientServer } from "@/app/config/supabase-server";
 
-const BUYER_FALLBACK_IMAGE = "/images/buyer-placeholder.jpg";
-
 function makeSlug(value: string) {
   const base = value
     .toLowerCase()
@@ -11,24 +9,14 @@ function makeSlug(value: string) {
     .replace(/^-+|-+$/g, "");
 
   const suffix = Math.random().toString(36).slice(2, 8);
-  return `${base || "listing"}-${suffix}`;
+  return `${base || "produce"}-${suffix}`;
 }
 
 function safeFileName(name: string) {
-  const cleaned = name
+  return name
     .toLowerCase()
-    .trim()
     .replace(/[^a-z0-9.]+/g, "-")
-    .replace(/-+/g, "-")
-    .replace(/^-+|-+$/g, "");
-
-  return cleaned || "buyer-image";
-}
-
-function isValidImageFile(value: FormDataEntryValue | null): value is File {
-  return (
-    value instanceof File && value.size > 0 && value.type.startsWith("image/")
-  );
+    .replace(/-+/g, "-");
 }
 
 export async function POST(request: Request) {
@@ -40,111 +28,79 @@ export async function POST(request: Request) {
   } = await supabase.auth.getUser();
 
   if (userError || !user) {
-    return NextResponse.redirect(new URL("/auth/login", request.url), 303);
+    return NextResponse.redirect(new URL("/auth/login", request.url));
   }
 
   const formData = await request.formData();
 
-  const module = String(formData.get("module") ?? "").trim();
+  const title = String(formData.get("title") || "").trim();
+  const description = String(formData.get("description") || "").trim();
+  const category = String(formData.get("category") || "").trim();
+  const city = String(formData.get("city") || "").trim();
+  const price = String(formData.get("price") || "").trim();
+  const phone = String(formData.get("phone") || "").trim();
 
-  if (module !== "buyers") {
-    return NextResponse.json(
-      {
-        error: "Unsupported module. Only buyers module is currently enabled.",
-      },
-      { status: 400 },
+  if (!title || !description || !city || !phone) {
+    return NextResponse.redirect(
+      new URL("/post-ad/produce?error=missing-fields", request.url),
     );
   }
 
-  const title = String(formData.get("title") ?? "").trim();
-  const buyer_type = String(formData.get("buyer_type") ?? "").trim();
-  const product_category = String(
-    formData.get("product_category") ?? "",
-  ).trim();
-  const product_needed = String(formData.get("product_needed") ?? "").trim();
-  const quantity = String(formData.get("quantity") ?? "").trim();
-  const city = String(formData.get("city") ?? "").trim();
-  const phone = String(formData.get("phone") ?? "").trim();
-  const description = String(formData.get("description") ?? "").trim();
+  const slug = makeSlug(title);
 
-  if (
-    !title ||
-    !buyer_type ||
-    !product_category ||
-    !product_needed ||
-    !city ||
-    !phone
-  ) {
-    return NextResponse.json(
-      {
-        error: "Missing required buyer fields.",
-      },
-      { status: 400 },
-    );
-  }
+  const imageUrls: string[] = [];
+  const images = formData.getAll("images");
 
-  let imageUrls: string[] = [BUYER_FALLBACK_IMAGE];
+  for (const item of images) {
+    if (!(item instanceof File)) continue;
+    if (!item.size) continue;
 
-  const image = formData.get("image");
-
-  if (isValidImageFile(image)) {
-    const originalExt = image.name.split(".").pop();
-    const ext = originalExt ? originalExt.toLowerCase() : "jpg";
-
-    const filePath = `${user.id}/${Date.now()}-${safeFileName(title)}.${ext}`;
+    const filePath = `${user.id}/${Date.now()}-${safeFileName(item.name)}`;
 
     const { error: uploadError } = await supabase.storage
-      .from("buyer-images")
-      .upload(filePath, image, {
+      .from("produce-images")
+      .upload(filePath, item, {
         cacheControl: "3600",
         upsert: false,
-        contentType: image.type || "image/jpeg",
+        contentType: item.type || "image/jpeg",
       });
 
     if (uploadError) {
-      return NextResponse.json(
-        {
-          error: uploadError.message,
-        },
-        { status: 500 },
-      );
+      console.error("Produce image upload error:", uploadError);
+      continue;
     }
 
-    const { data: publicUrlData } = supabase.storage
-      .from("buyer-images")
-      .getPublicUrl(filePath);
+    const {
+      data: { publicUrl },
+    } = supabase.storage.from("produce-images").getPublicUrl(filePath);
 
-    if (publicUrlData?.publicUrl) {
-      imageUrls = [publicUrlData.publicUrl];
-    }
+    imageUrls.push(publicUrl);
   }
 
-  const finalDescription = description
-    ? `${description}\n\nCategory: ${product_category}`
-    : `Category: ${product_category}`;
+  const { error: insertError } = await supabase
+    .from("produce_listings")
+    .insert({
+      user_id: user.id,
+      title,
+      slug,
+      description,
+      category: category || null,
+      city,
+      price: price || null,
+      phone,
+      images: imageUrls,
+      status: "pending",
+    });
 
-  const { error } = await supabase.from("buyer_listings").insert({
-    user_id: user.id,
-    title,
-    slug: makeSlug(title),
-    buyer_type,
-    product_needed,
-    quantity: quantity || null,
-    city,
-    phone,
-    description: finalDescription,
-    status: "pending",
-    image_urls: imageUrls,
-  });
+  if (insertError) {
+    console.error("Produce listing insert error:", insertError);
 
-  if (error) {
-    return NextResponse.json(
-      {
-        error: error.message,
-      },
-      { status: 500 },
+    return NextResponse.redirect(
+      new URL("/post-ad/produce?error=submit-failed", request.url),
     );
   }
 
-  return NextResponse.redirect(new URL("/my-listings", request.url), 303);
+  return NextResponse.redirect(
+    new URL("/my-listings?success=produce-submitted", request.url),
+  );
 }

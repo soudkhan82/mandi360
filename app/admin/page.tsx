@@ -175,13 +175,29 @@ export default async function AdminPage() {
                   </div>
 
                   <div className="flex items-center gap-2 md:flex-col md:items-stretch md:justify-center">
-                    <form action={`/admin/${listing.id}/approve`} method="POST">
+                    <form action="/admin/action" method="POST">
+                      <input type="hidden" name="id" value={listing.id} />
                       <input type="hidden" name="table" value={listing.table} />
+                      <input type="hidden" name="action" value="approve" />
+
                       <button
                         type="submit"
                         className="rounded-full bg-emerald-500 px-5 py-2 text-sm font-bold text-white hover:bg-emerald-600"
                       >
                         Approve
+                      </button>
+                    </form>
+
+                    <form action="/admin/action" method="POST">
+                      <input type="hidden" name="id" value={listing.id} />
+                      <input type="hidden" name="table" value={listing.table} />
+                      <input type="hidden" name="action" value="reject" />
+
+                      <button
+                        type="submit"
+                        className="rounded-full bg-rose-500 px-5 py-2 text-sm font-bold text-white hover:bg-rose-600"
+                      >
+                        Reject
                       </button>
                     </form>
 
