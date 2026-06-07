@@ -4,7 +4,7 @@ import { createClientServer } from "@/app/lib/supabase/server";
 export const dynamic = "force-dynamic";
 
 type ModuleAdFormProps = {
-  module: "produce" | "logistics" | "consultants" | "agri-inputs";
+  module: "produce" | "logistics" | "consultants" | "agri-inputs" | "buyers";
   title: string;
   subtitle: string;
   categoryLabel: string;

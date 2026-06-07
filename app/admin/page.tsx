@@ -1,222 +1,281 @@
 import Link from "next/link";
-import { createClient } from "@supabase/supabase-js";
+import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
+import { createClientServer } from "@/app/lib/supabase/server";
+
+export const dynamic = "force-dynamic";
+
+type AnyRow = Record<string, any>;
 
 type AdminListing = {
   id: string;
-  module: string;
   table: string;
+  module: string;
   title: string;
-  slug: string;
-  status: string | null;
+  productType: string;
+  city: string;
+  status: string;
+  slug: string | null;
   created_at: string | null;
-  image_urls: string[] | null;
-  user_id: string | null;
 };
 
-export const dynamic = "force-dynamic";
-export const revalidate = 0;
-
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!,
+const LISTING_SOURCES = [
   {
-    auth: {
-      persistSession: false,
-      autoRefreshToken: false,
-    },
+    module: "Buyers",
+    table: "buyer_listings",
+    typeFields: ["product_type", "product", "category", "crop_type"],
   },
-);
+  {
+    module: "Produce",
+    table: "produce_listings",
+    typeFields: ["product_type", "produce_type", "category", "crop_type"],
+  },
+  {
+    module: "Logistics",
+    table: "logistics_listings",
+    typeFields: ["vehicle_type", "service_type", "logistics_type", "category"],
+  },
+  {
+    module: "Consultants",
+    table: "service_listings",
+    typeFields: [
+      "service_type",
+      "consultancy_type",
+      "expertise",
+      "category",
+      "category_name",
+    ],
+  },
+  {
+    module: "Agri Inputs",
+    table: "agri_input_listings",
+    typeFields: ["input_type", "product_type", "category"],
+  },
+];
 
-async function fetchPendingListings(): Promise<AdminListing[]> {
-  const queries = await Promise.all([
-    supabaseAdmin
-      .from("produce_listings")
-      .select("id,title,slug,status,created_at,image_urls,user_id")
-      .eq("status", "pending")
-      .order("created_at", { ascending: false }),
+const ALLOWED_TABLES = LISTING_SOURCES.map((item) => item.table);
 
-    supabaseAdmin
-      .from("logistics_listings")
-      .select("id,title,slug,status,created_at,image_urls,user_id")
-      .eq("status", "pending")
-      .order("created_at", { ascending: false }),
+function pick(row: AnyRow, keys: string[], fallback = "-") {
+  for (const key of keys) {
+    const value = row?.[key];
 
-    supabaseAdmin
-      .from("service_listings")
-      .select("id,title,slug,status,created_at,image_urls,user_id")
-      .eq("status", "pending")
-      .order("created_at", { ascending: false }),
+    if (value !== null && value !== undefined && String(value).trim() !== "") {
+      return String(value);
+    }
+  }
 
-    supabaseAdmin
-      .from("input_supplier_listings")
-      .select("id,title,slug,status,created_at,image_urls,user_id")
-      .eq("status", "pending")
-      .order("created_at", { ascending: false }),
-  ]);
+  return fallback;
+}
 
-  const [produce, logistics, services, inputs] = queries;
+function normalizeListing(
+  row: AnyRow,
+  source: (typeof LISTING_SOURCES)[number],
+): AdminListing {
+  return {
+    id: String(row.id),
+    table: source.table,
+    module: source.module,
+    title: pick(row, ["title", "name", "ad_title"], "Untitled"),
+    productType: pick(row, source.typeFields, "-"),
+    city: pick(row, ["city", "city_name", "location"], "-"),
+    status: pick(row, ["status"], "pending"),
+    slug: row.slug ? String(row.slug) : null,
+    created_at: row.created_at ? String(row.created_at) : null,
+  };
+}
 
-  if (produce.error) console.error("Produce admin fetch error:", produce.error);
-  if (logistics.error)
-    console.error("Logistics admin fetch error:", logistics.error);
-  if (services.error)
-    console.error("Services admin fetch error:", services.error);
-  if (inputs.error) console.error("Inputs admin fetch error:", inputs.error);
+async function getPendingListings(): Promise<AdminListing[]> {
+  const supabase = await createClientServer();
 
-  const rows: AdminListing[] = [
-    ...(produce.data || []).map((item) => ({
-      ...item,
-      module: "Produce",
-      table: "produce_listings",
-    })),
-    ...(logistics.data || []).map((item) => ({
-      ...item,
-      module: "Logistics",
-      table: "logistics_listings",
-    })),
-    ...(services.data || []).map((item) => ({
-      ...item,
-      module: "Consultants",
-      table: "service_listings",
-    })),
-    ...(inputs.data || []).map((item) => ({
-      ...item,
-      module: "Agri Inputs",
-      table: "input_supplier_listings",
-    })),
-  ];
+  const results = await Promise.all(
+    LISTING_SOURCES.map(async (source) => {
+      const { data, error } = await supabase
+        .from(source.table)
+        .select("*")
+        .eq("status", "pending")
+        .order("created_at", { ascending: false });
 
-  return rows.sort((a, b) => {
-    const da = a.created_at ? new Date(a.created_at).getTime() : 0;
-    const db = b.created_at ? new Date(b.created_at).getTime() : 0;
-    return db - da;
+      if (error) {
+        console.warn(`Admin queue skipped ${source.table}: ${error.message}`);
+        return [];
+      }
+
+      return (data ?? []).map((row) => normalizeListing(row, source));
+    }),
+  );
+
+  return results.flat().sort((a, b) => {
+    const aTime = a.created_at ? new Date(a.created_at).getTime() : 0;
+    const bTime = b.created_at ? new Date(b.created_at).getTime() : 0;
+    return bTime - aTime;
   });
 }
 
+async function approveListing(formData: FormData) {
+  "use server";
+
+  const table = String(formData.get("table") || "");
+  const id = String(formData.get("id") || "");
+
+  if (!ALLOWED_TABLES.includes(table) || !id) {
+    throw new Error("Invalid approval request.");
+  }
+
+  const supabase = await createClientServer();
+
+  const { error } = await supabase
+    .from(table)
+    .update({ status: "published" })
+    .eq("id", id);
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  revalidatePath("/admin");
+  revalidatePath("/my-listings");
+  revalidatePath("/");
+  redirect("/admin");
+}
+
+async function rejectListing(formData: FormData) {
+  "use server";
+
+  const table = String(formData.get("table") || "");
+  const id = String(formData.get("id") || "");
+
+  if (!ALLOWED_TABLES.includes(table) || !id) {
+    throw new Error("Invalid rejection request.");
+  }
+
+  const supabase = await createClientServer();
+
+  const { error } = await supabase
+    .from(table)
+    .update({ status: "rejected" })
+    .eq("id", id);
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  revalidatePath("/admin");
+  revalidatePath("/my-listings");
+  revalidatePath("/");
+  redirect("/admin");
+}
+
 export default async function AdminPage() {
-  const listings = await fetchPendingListings();
+  const listings = await getPendingListings();
 
   return (
-    <main className="min-h-[calc(100vh-64px)] bg-slate-50 px-4 py-10">
-      <section className="mx-auto max-w-6xl">
-        <div className="mb-8">
-          <h1 className="text-3xl font-extrabold tracking-tight text-slate-950">
-            Admin Approval Queue
-          </h1>
-          <p className="mt-2 text-sm text-slate-600">
-            Review pending marketplace listings.
-          </p>
+    <main className="min-h-[calc(100vh-64px)] bg-slate-50 px-6 py-10">
+      <div className="mx-auto max-w-6xl">
+        <h1 className="text-3xl font-extrabold tracking-tight text-slate-950">
+          Admin Approval Queue
+        </h1>
+
+        <p className="mt-2 text-sm text-slate-700">
+          Review pending marketplace listings.
+        </p>
+
+        <div className="mt-8 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+          {listings.length === 0 ? (
+            <div className="flex min-h-[140px] flex-col items-center justify-center px-6 py-10 text-center">
+              <h2 className="text-xl font-bold text-slate-950">
+                No pending listings
+              </h2>
+              <p className="mt-3 text-sm text-slate-600">
+                Approval queue is clear.
+              </p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[850px] text-left text-sm">
+                <thead className="border-b border-slate-200 bg-slate-50 text-xs uppercase tracking-wide text-slate-600">
+                  <tr>
+                    <th className="px-5 py-4">Module</th>
+                    <th className="px-5 py-4">Title</th>
+                    <th className="px-5 py-4">Product / Type</th>
+                    <th className="px-5 py-4">City</th>
+                    <th className="px-5 py-4">Status</th>
+                    <th className="px-5 py-4 text-right">Action</th>
+                  </tr>
+                </thead>
+
+                <tbody className="divide-y divide-slate-200">
+                  {listings.map((item) => (
+                    <tr key={`${item.table}-${item.id}`} className="bg-white">
+                      <td className="px-5 py-5 font-bold text-slate-900">
+                        {item.module}
+                      </td>
+
+                      <td className="px-5 py-5 font-bold text-slate-950">
+                        {item.title}
+                      </td>
+
+                      <td className="px-5 py-5 text-slate-700">
+                        {item.productType}
+                      </td>
+
+                      <td className="px-5 py-5 text-slate-700">{item.city}</td>
+
+                      <td className="px-5 py-5">
+                        <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-bold text-amber-700">
+                          Pending
+                        </span>
+                      </td>
+
+                      <td className="px-5 py-5">
+                        <div className="flex items-center justify-end gap-4">
+                          {item.slug ? (
+                            <Link
+                              href={`/listing/${item.slug}`}
+                              className="font-bold text-emerald-700 hover:text-emerald-800"
+                            >
+                              View
+                            </Link>
+                          ) : null}
+
+                          <form action={approveListing}>
+                            <input
+                              type="hidden"
+                              name="table"
+                              value={item.table}
+                            />
+                            <input type="hidden" name="id" value={item.id} />
+                            <button
+                              type="submit"
+                              className="font-bold text-green-700 hover:text-green-800"
+                            >
+                              Approve
+                            </button>
+                          </form>
+
+                          <form action={rejectListing}>
+                            <input
+                              type="hidden"
+                              name="table"
+                              value={item.table}
+                            />
+                            <input type="hidden" name="id" value={item.id} />
+                            <button
+                              type="submit"
+                              className="font-bold text-red-600 hover:text-red-700"
+                            >
+                              Reject
+                            </button>
+                          </form>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
-
-        {listings.length === 0 ? (
-          <div className="rounded-xl border border-slate-300 bg-white p-10 text-center shadow-sm">
-            <h2 className="text-xl font-bold text-slate-950">
-              No pending listings
-            </h2>
-            <p className="mt-3 text-sm text-slate-600">
-              Approval queue is clear.
-            </p>
-          </div>
-        ) : (
-          <div className="space-y-4">
-            {listings.map((listing) => {
-              const coverImage =
-                listing.image_urls && listing.image_urls.length > 0
-                  ? listing.image_urls[0]
-                  : "/images/placeholder.jpg";
-
-              return (
-                <div
-                  key={`${listing.table}-${listing.id}`}
-                  className="grid gap-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm md:grid-cols-[140px_1fr_auto]"
-                >
-                  <div className="h-28 overflow-hidden rounded-xl bg-slate-100">
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src={coverImage}
-                      alt={listing.title}
-                      className="h-full w-full object-cover"
-                    />
-                  </div>
-
-                  <div className="min-w-0">
-                    <div className="mb-2 flex flex-wrap items-center gap-2">
-                      <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-bold text-amber-700">
-                        Pending
-                      </span>
-                      <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700">
-                        {listing.module}
-                      </span>
-                    </div>
-
-                    <h2 className="truncate text-xl font-extrabold text-slate-950">
-                      {listing.title}
-                    </h2>
-
-                    <p className="mt-1 text-xs text-slate-500">
-                      Table: {listing.table}
-                    </p>
-
-                    <p className="mt-1 text-xs text-slate-500">
-                      Created:{" "}
-                      {listing.created_at
-                        ? new Date(listing.created_at).toLocaleString()
-                        : "N/A"}
-                    </p>
-
-                    <div className="mt-3">
-                      <Link
-                        href={`/listing/${listing.slug}`}
-                        className="text-sm font-bold text-emerald-700 hover:text-emerald-800"
-                      >
-                        View listing
-                      </Link>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-2 md:flex-col md:items-stretch md:justify-center">
-                    <form action="/admin/action" method="POST">
-                      <input type="hidden" name="id" value={listing.id} />
-                      <input type="hidden" name="table" value={listing.table} />
-                      <input type="hidden" name="action" value="approve" />
-
-                      <button
-                        type="submit"
-                        className="rounded-full bg-emerald-500 px-5 py-2 text-sm font-bold text-white hover:bg-emerald-600"
-                      >
-                        Approve
-                      </button>
-                    </form>
-
-                    <form action="/admin/action" method="POST">
-                      <input type="hidden" name="id" value={listing.id} />
-                      <input type="hidden" name="table" value={listing.table} />
-                      <input type="hidden" name="action" value="reject" />
-
-                      <button
-                        type="submit"
-                        className="rounded-full bg-rose-500 px-5 py-2 text-sm font-bold text-white hover:bg-rose-600"
-                      >
-                        Reject
-                      </button>
-                    </form>
-
-                    <form action={`/admin/${listing.id}/reject`} method="POST">
-                      <input type="hidden" name="table" value={listing.table} />
-                      <button
-                        type="submit"
-                        className="rounded-full bg-rose-500 px-5 py-2 text-sm font-bold text-white hover:bg-rose-600"
-                      >
-                        Reject
-                      </button>
-                    </form>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </section>
+      </div>
     </main>
   );
 }

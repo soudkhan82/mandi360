@@ -2,7 +2,8 @@ export type MarketplaceModule =
   | "produce"
   | "logistics"
   | "consultants"
-  | "agri-inputs";
+  | "agri-inputs"
+  | "buyers";
 
 export type ModuleConfig = {
   key: MarketplaceModule;
@@ -28,7 +29,7 @@ export const MARKETPLACE_MODULES: Record<MarketplaceModule, ModuleConfig> = {
     postPath: "/post-ad/produce",
     imageBucket: "produce-images",
     fields: {
-      categoryLabel: "Category",
+      categoryLabel: "Crop / Produce Type",
       priceLabel: "Price",
       quantityLabel: "Quantity",
       unitLabel: "Unit",
@@ -76,6 +77,21 @@ export const MARKETPLACE_MODULES: Record<MarketplaceModule, ModuleConfig> = {
       categoryLabel: "Input Type",
       priceLabel: "Price",
       quantityLabel: "Quantity",
+      unitLabel: "Unit",
+    },
+  },
+
+  buyers: {
+    key: "buyers",
+    label: "Buyers",
+    table: "buyer_listings",
+    browsePath: "/buyers",
+    postPath: "/post-ad/buyers",
+    imageBucket: "buyer-images",
+    fields: {
+      categoryLabel: "Product Category",
+      priceLabel: "Expected Price",
+      quantityLabel: "Quantity Required",
       unitLabel: "Unit",
     },
   },

@@ -3,34 +3,50 @@ import { createClientServer } from "@/app/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
 
-type ModuleKey = "produce" | "logistics" | "consultants" | "agri-inputs";
+type ModuleKey =
+  | "produce"
+  | "logistics"
+  | "consultants"
+  | "agri-inputs"
+  | "buyers";
 
 const MODULE_CONFIG: Record<
   ModuleKey,
   {
+    label: string;
     table: string;
     bucket: string;
     redirectTo: string;
   }
 > = {
   produce: {
+    label: "Produce",
     table: "produce_listings",
     bucket: "produce-images",
     redirectTo: "/my-listings",
   },
   logistics: {
+    label: "Logistics",
     table: "logistics_listings",
     bucket: "logistics-images",
     redirectTo: "/my-listings",
   },
   consultants: {
+    label: "Consultants",
     table: "service_listings",
     bucket: "service-images",
     redirectTo: "/my-listings",
   },
   "agri-inputs": {
+    label: "Agri Inputs",
     table: "input_supplier_listings",
     bucket: "input-images",
+    redirectTo: "/my-listings",
+  },
+  buyers: {
+    label: "Buyers",
+    table: "buyer_listings",
+    bucket: "buyer-images",
     redirectTo: "/my-listings",
   },
 };
@@ -47,7 +63,6 @@ function cleanText(value: FormDataEntryValue | null) {
 
 function cleanNumber(value: FormDataEntryValue | null) {
   if (typeof value !== "string") return null;
-
   const trimmed = value.trim();
   if (!trimmed) return null;
 
@@ -60,7 +75,8 @@ function isValidModule(value: string | null): value is ModuleKey {
     value === "produce" ||
     value === "logistics" ||
     value === "consultants" ||
-    value === "agri-inputs"
+    value === "agri-inputs" ||
+    value === "buyers"
   );
 }
 
@@ -93,6 +109,15 @@ function removeEmptyValues(payload: Record<string, any>) {
   }
 
   return cleaned;
+}
+
+function getMissingColumn(message: string) {
+  return (
+    message.match(/Could not find the '([^']+)' column/i)?.[1] ||
+    message.match(/column "([^"]+)" of relation/i)?.[1] ||
+    message.match(/column ([a-zA-Z0-9_]+) does not exist/i)?.[1] ||
+    null
+  );
 }
 
 async function uploadImages({
@@ -156,74 +181,76 @@ function buildPayload({
   const price = cleanNumber(formData.get("price"));
   const phone = cleanText(formData.get("phone"));
   const city = cleanText(formData.get("city"));
+  const description = cleanText(formData.get("description"));
+
+  const base = {
+    user_id: userId,
+    title,
+    slug: makeSlug(title),
+    status: "pending",
+    description,
+    city,
+    phone,
+    image_urls: imageUrls,
+  };
 
   if (module === "produce") {
     return removeEmptyValues({
-      user_id: userId,
-      title,
-      slug: makeSlug(title),
-      status: "pending",
+      ...base,
       crop: category || cleanText(formData.get("crop")),
       variety: cleanText(formData.get("variety")),
       quantity: cleanNumber(formData.get("quantity")),
       unit: cleanText(formData.get("unit")),
       price,
-      city,
-      phone,
-      description: cleanText(formData.get("description")),
-      image_urls: imageUrls,
     });
   }
 
   if (module === "logistics") {
     return removeEmptyValues({
-      user_id: userId,
-      title,
-      slug: makeSlug(title),
-      status: "pending",
+      ...base,
+      category,
       service_type: category,
       vehicle_type: category,
+      price,
       price_per_trip: price,
-      city,
-      phone,
       contact_phone: phone,
-      description: cleanText(formData.get("description")),
-      image_urls: imageUrls,
     });
   }
 
   if (module === "consultants") {
     return removeEmptyValues({
-      user_id: userId,
-      title,
-      slug: makeSlug(title),
-      status: "pending",
+      ...base,
+      category,
       service_category: category,
       service_type: category,
-      category,
+      consulting_type: category,
       price,
-      city,
-      phone,
       contact_phone: phone,
-      description: cleanText(formData.get("description")),
-      image_urls: imageUrls,
+    });
+  }
+
+  if (module === "buyers") {
+    return removeEmptyValues({
+      ...base,
+      buyer_type: category,
+      product_category: category,
+      product_needed:
+        cleanText(formData.get("product_needed")) ||
+        cleanText(formData.get("category")) ||
+        title,
+      quantity: cleanText(formData.get("quantity")),
+      contact_phone: phone,
     });
   }
 
   return removeEmptyValues({
-    user_id: userId,
-    title,
-    slug: makeSlug(title),
-    status: "pending",
+    ...base,
     category,
+    brand_name: category,
     price_per_unit: price,
     price_unit: "unit",
     stock_unit: "unit",
-    city,
-    phone,
     contact_phone: phone,
-    description: cleanText(formData.get("description")),
-    image_urls: imageUrls,
   });
 }
 
@@ -236,17 +263,33 @@ async function insertListing({
   table: string;
   payload: Record<string, any>;
 }) {
-  const { data, error } = await supabase
-    .from(table)
-    .insert(payload)
-    .select("id,slug")
-    .single();
+  let currentPayload = { ...payload };
 
-  if (error) {
+  for (let attempt = 0; attempt < 15; attempt++) {
+    const { data, error } = await supabase
+      .from(table)
+      .insert(currentPayload)
+      .select("id, slug")
+      .single();
+
+    if (!error) return data;
+
+    const message = error.message || "";
+    const missingColumn = getMissingColumn(message);
+
+    if (missingColumn && missingColumn in currentPayload) {
+      console.warn(
+        `Removing unsupported column '${missingColumn}' for ${table}`,
+      );
+      const { [missingColumn]: _removed, ...rest } = currentPayload;
+      currentPayload = rest;
+      continue;
+    }
+
     console.error("SUPABASE INSERT FAILED:", {
       table,
-      payload,
-      payloadKeys: Object.keys(payload),
+      payload: currentPayload,
+      payloadKeys: Object.keys(currentPayload),
       message: error.message,
       details: error.details,
       hint: error.hint,
@@ -256,7 +299,7 @@ async function insertListing({
     throw new Error(error.message);
   }
 
-  return data;
+  throw new Error(`Insert failed for ${table}. Too many unsupported columns.`);
 }
 
 export async function POST(request: Request) {

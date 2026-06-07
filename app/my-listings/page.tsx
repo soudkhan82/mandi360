@@ -6,10 +6,17 @@ export const dynamic = "force-dynamic";
 
 type AnyRow = Record<string, any>;
 
+type ModuleKey =
+  | "buyers"
+  | "produce"
+  | "logistics"
+  | "consultants"
+  | "agri-inputs";
+
 type MyListing = {
   id: string;
-  module: "Buyers" | "Produce";
-  moduleKey: "buyers" | "produce";
+  module: string;
+  moduleKey: ModuleKey;
   title: string;
   product: string;
   city: string;
@@ -22,10 +29,12 @@ type MyListing = {
 function pick(row: AnyRow, keys: string[], fallback = "-") {
   for (const key of keys) {
     const value = row?.[key];
+
     if (value !== null && value !== undefined && String(value).trim() !== "") {
       return String(value);
     }
   }
+
   return fallback;
 }
 
@@ -38,15 +47,40 @@ function getCoverImage(row: AnyRow) {
     return row.images[0];
   }
 
-  return row.image_url || row.cover_image || null;
+  return row.image_url || row.cover_image || row.first_image || null;
 }
 
 function statusClass(status: string) {
   if (status === "published") return "bg-emerald-50 text-emerald-700";
-  if (status === "pending") return "bg-slate-100 text-slate-700";
+  if (status === "pending") return "bg-amber-50 text-amber-700";
   if (status === "draft") return "bg-slate-100 text-slate-700";
   if (status === "rejected") return "bg-red-50 text-red-700";
   return "bg-slate-100 text-slate-700";
+}
+
+function mapRows({
+  rows,
+  module,
+  moduleKey,
+  productKeys,
+}: {
+  rows: AnyRow[] | null;
+  module: string;
+  moduleKey: ModuleKey;
+  productKeys: string[];
+}): MyListing[] {
+  return (rows || []).map((item) => ({
+    id: item.id,
+    module,
+    moduleKey,
+    title: pick(item, ["title", "buyer_title", "requirement_title"]),
+    product: pick(item, productKeys),
+    city: pick(item, ["city", "location", "service_area"]),
+    status: pick(item, ["status"], "pending").toLowerCase(),
+    slug: item.slug || null,
+    created_at: item.created_at || null,
+    coverImage: getCoverImage(item),
+  }));
 }
 
 export default async function MyListingsPage() {
@@ -61,67 +95,130 @@ export default async function MyListingsPage() {
     redirect("/auth/login");
   }
 
-  const { data: buyerRows, error: buyerError } = await supabase
-    .from("buyer_listings")
-    .select("*")
-    .eq("user_id", user.id)
-    .order("created_at", { ascending: false });
+  const [
+    buyersResult,
+    produceResult,
+    logisticsResult,
+    consultantsResult,
+    inputsResult,
+  ] = await Promise.all([
+    supabase
+      .from("buyer_listings")
+      .select("*")
+      .eq("user_id", user.id)
+      .order("created_at", { ascending: false }),
 
-  const { data: produceRows, error: produceError } = await supabase
-    .from("produce_listings")
-    .select("*")
-    .eq("user_id", user.id)
-    .order("created_at", { ascending: false });
+    supabase
+      .from("produce_listings")
+      .select("*")
+      .eq("user_id", user.id)
+      .order("created_at", { ascending: false }),
 
-  if (buyerError || produceError) {
+    supabase
+      .from("logistics_listings")
+      .select("*")
+      .eq("user_id", user.id)
+      .order("created_at", { ascending: false }),
+
+    supabase
+      .from("service_listings")
+      .select("*")
+      .eq("user_id", user.id)
+      .order("created_at", { ascending: false }),
+
+    supabase
+      .from("input_supplier_listings")
+      .select("*")
+      .eq("user_id", user.id)
+      .order("created_at", { ascending: false }),
+  ]);
+
+  const firstError =
+    buyersResult.error ||
+    produceResult.error ||
+    logisticsResult.error ||
+    consultantsResult.error ||
+    inputsResult.error;
+
+  if (firstError) {
     return (
       <main className="min-h-screen bg-[#f5f5f5] px-6 py-10">
         <section className="mx-auto max-w-6xl">
           <div className="rounded-xl border border-red-200 bg-red-50 p-5 text-sm text-red-700">
-            {buyerError?.message || produceError?.message}
+            {firstError.message}
           </div>
         </section>
       </main>
     );
   }
 
-  const buyers: MyListing[] = (buyerRows || []).map((item: AnyRow) => ({
-    id: item.id,
-    module: "Buyers",
-    moduleKey: "buyers",
-    title: pick(item, ["title", "buyer_title", "requirement_title"]),
-    product: pick(item, [
-      "product",
-      "product_name",
-      "required_product",
-      "requirement",
-      "category",
-      "description",
-      "details",
-    ]),
-    city: pick(item, ["city", "location"]),
-    status: pick(item, ["status"], "pending").toLowerCase(),
-    slug: item.slug || null,
-    created_at: item.created_at || null,
-    coverImage: getCoverImage(item),
-  }));
+  const listings = [
+    ...mapRows({
+      rows: buyersResult.data,
+      module: "Buyers",
+      moduleKey: "buyers",
+      productKeys: [
+        "product_needed",
+        "product",
+        "product_name",
+        "required_product",
+        "requirement",
+        "description",
+      ],
+    }),
 
-  const produce: MyListing[] = (produceRows || []).map((item: AnyRow) => ({
-    id: item.id,
-    module: "Produce",
-    moduleKey: "produce",
-    title: pick(item, ["title"]),
-    product:
-      [item.crop, item.variety].filter(Boolean).join(" / ") ||
-      pick(item, ["product", "product_name", "description"]),
-    city: pick(item, ["city", "location"]),
-    status: pick(item, ["status"], "pending").toLowerCase(),
-    slug: item.slug || null,
-    created_at: item.created_at || null,
-    coverImage: getCoverImage(item),
-  }));
+    ...mapRows({
+      rows: produceResult.data,
+      module: "Produce",
+      moduleKey: "produce",
+      productKeys: [
+        "crop",
+        "variety",
+        "product",
+        "product_name",
+        "description",
+      ],
+    }),
 
-  const listings = [...buyers, ...produce].sort((a, b) => {
+    ...mapRows({
+      rows: logisticsResult.data,
+      module: "Logistics",
+      moduleKey: "logistics",
+      productKeys: [
+        "vehicle_type",
+        "service_type",
+        "category",
+        "service_category",
+        "description",
+      ],
+    }),
+
+    ...mapRows({
+      rows: consultantsResult.data,
+      module: "Consultants",
+      moduleKey: "consultants",
+      productKeys: [
+        "service_type",
+        "service_category",
+        "consulting_type",
+        "category",
+        "description",
+      ],
+    }),
+
+    ...mapRows({
+      rows: inputsResult.data,
+      module: "Agri Inputs",
+      moduleKey: "agri-inputs",
+      productKeys: [
+        "category",
+        "brand_name",
+        "input_type",
+        "product_name",
+        "description",
+      ],
+    }),
+  ].sort((a, b) => {
     const da = a.created_at ? new Date(a.created_at).getTime() : 0;
     const db = b.created_at ? new Date(b.created_at).getTime() : 0;
     return db - da;
@@ -134,7 +231,7 @@ export default async function MyListingsPage() {
           <div>
             <h1 className="text-3xl font-black text-slate-950">My Listings</h1>
             <p className="mt-1 text-sm text-slate-600">
-              Manage your submitted ads and approval status.
+              Manage all your submitted ads, approvals, edits and deletion.
             </p>
           </div>
 
@@ -153,7 +250,7 @@ export default async function MyListingsPage() {
                 <th className="w-24 px-4 py-3 text-left">Ad</th>
                 <th className="px-4 py-3 text-left">Module</th>
                 <th className="px-4 py-3 text-left">Title</th>
-                <th className="px-4 py-3 text-left">Product</th>
+                <th className="px-4 py-3 text-left">Product / Type</th>
                 <th className="px-4 py-3 text-left">City</th>
                 <th className="px-4 py-3 text-left">Status</th>
                 <th className="px-4 py-3 text-right">Action</th>
@@ -172,9 +269,10 @@ export default async function MyListingsPage() {
                 </tr>
               ) : (
                 listings.map((item) => (
-                  <tr key={`${item.module}-${item.id}`} className="border-t">
+                  <tr key={`${item.moduleKey}-${item.id}`} className="border-t">
                     <td className="px-4 py-3">
                       {item.coverImage ? (
+                        // eslint-disable-next-line @next/next/no-img-element
                         <img
                           src={item.coverImage}
                           alt={item.title}
